@@ -190,7 +190,11 @@
           const v = r.block.reduce((s, x) => s + vAligned[x][it.key], 0);
           r.bSum[it.key] = b; r.vSum[it.key] = v; r.diff[it.key] = b - v;
         }
-        r.ok = ITEMS.every(it => r.diff[it.key] === 0);
+        // QR 상계: 추심분이 가맹점 정산 지급액에서 빠지면 QR추심·QR정산 차액이 같은 금액으로 생긴다. 이 경우는 일치로 본다
+        const qrOffset = r.diff.qr_col !== 0 && r.diff.qr_col === r.diff.qr_set
+          && ITEMS.every(it => it.key === 'qr_col' || it.key === 'qr_set' || r.diff[it.key] === 0);
+        r.offset = qrOffset ? r.diff.qr_col : 0;
+        r.ok = qrOffset || ITEMS.every(it => r.diff[it.key] === 0);
       }
     }
 
@@ -206,8 +210,9 @@
       days: dates.filter(d => bank.data[d][k]).map(d => ({ date: d, amt: bank.data[d][k] })),
     }));
     const mismatches = rows.filter(r => r.closes && !r.ok);
+    const offsets = rows.filter(r => r.closes && r.offset);
     const usedHolidays = dates.filter(d => !isBiz(d));
-    return { start: dates[0], end: dates[dates.length - 1], dates, rows, vAligned, totals, bankOnly, mismatches, warnings, usedHolidays, bank, voucher };
+    return { start: dates[0], end: dates[dates.length - 1], dates, rows, vAligned, totals, bankOnly, mismatches, offsets, warnings, usedHolidays, bank, voucher };
   }
 
   // ---------- 엑셀 생성 ----------
@@ -219,7 +224,7 @@
     const thin = { style: 'thin', color: { argb: 'FFBFC7D1' } };
     const border = { top: thin, left: thin, bottom: thin, right: thin };
     const fill = argb => ({ type: 'pattern', pattern: 'solid', fgColor: { argb } });
-    const HEAD = fill('FF1F3A5F'), SUB = fill('FFDCE4EE'), HOL = fill('FFF3F4F6'), BAD = fill('FFFDE2E1'), GOOD = fill('FFE6F4EA');
+    const HEAD = fill('FF1F3A5F'), SUB = fill('FFDCE4EE'), HOL = fill('FFF3F4F6'), BAD = fill('FFFDE2E1'), GOOD = fill('FFE6F4EA'), OFFSET = fill('FFFDF3DC');
     const head = (cell, sub) => { cell.font = { bold: true, color: { argb: sub ? 'FF1F2937' : 'FFFFFFFF' } }; cell.fill = sub ? SUB : HEAD; cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }; cell.border = border; };
     const colL = n => { let s = ''; while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); } return s; };
     const B = res.bank.data;
@@ -295,10 +300,10 @@
           const bc = colL(bankKeyCol[it.key]), vc = colL(3 + i);
           const f = r1 === r2 ? `'1. 통장'!${bc}${r1}-'2. 상품권'!${vc}${r1}` : `SUM('1. 통장'!${bc}${r1}:${bc}${r2})-SUM('2. 상품권'!${vc}${r1}:${vc}${r2})`;
           const c = row.getCell(4 + i); c.value = { formula: f, result: r.diff[it.key] }; c.numFmt = FMT;
-          if (r.diff[it.key] !== 0) c.fill = BAD;
+          if (r.diff[it.key] !== 0) c.fill = r.offset ? OFFSET : BAD;
         });
         const st = row.getCell(stc);
-        st.value = r.open ? '참고(합산 미완료)' : r.ok ? '일치' : '불일치';
+        st.value = r.open ? '참고(합산 미완료)' : r.offset ? '일치(QR 상계)' : r.ok ? '일치' : '불일치';
         st.fill = r.open ? HOL : r.ok ? GOOD : BAD; st.alignment = { horizontal: 'center' };
       } else {
         const close = r.block[r.block.length - 1];
@@ -331,9 +336,17 @@
     put(['상품권 파일', meta.voucherName || ''], {});
     put(['생성 시각', meta.createdAt || ''], {});
     put(['불일치 영업일', res.mismatches.filter(m => !m.open).length ? `${res.mismatches.filter(m => !m.open).length}일` : '없음'], {});
+    const offsetSum = res.offsets.reduce((s, o) => s + o.offset, 0);
+    put(['QR 상계(일치 처리)', res.offsets.length ? `${res.offsets.length}일 · ${offsetSum.toLocaleString('ko-KR')}원` : '없음'], {});
     r++;
     put(['항목', '통장', '상품권', '차액', '기준'], { head: true });
-    ITEMS.forEach(it => { const t = res.totals[it.key]; put([it.name, t.b, t.v, t.diff, `${it.lag ? 'D-1' : 'D'} · ${it.src}`]); const c = s4.getCell(r - 1, 4); if (t.diff) c.fill = BAD; });
+    ITEMS.forEach(it => {
+      const t = res.totals[it.key];
+      // QR 차액이 상계 합계와 같으면 설명되는 차액이므로 노란색으로 구분
+      const explained = (it.key === 'qr_col' || it.key === 'qr_set') && t.diff === offsetSum;
+      put([it.name, t.b, t.v, t.diff, `${it.lag ? 'D-1' : 'D'} · ${it.src}${explained && t.diff ? ' (차액은 QR 상계분)' : ''}`]);
+      const c = s4.getCell(r - 1, 4); if (t.diff) c.fill = explained ? OFFSET : BAD;
+    });
     r++;
     put(['통장 단독 항목 (대사 제외)', '합계', '입금·출금일', '', ''], { head: true });
     res.bankOnly.forEach(o => put([o.name, o.total, o.days.length ? o.days.map(x => `${short(x.date)} ${x.amt.toLocaleString('ko-KR')}`).join(', ') : '-']));
@@ -341,6 +354,10 @@
     put(['불일치 내역', '항목', '차액', '합산기간', ''], { head: true });
     if (!res.mismatches.length) put(['없음']);
     res.mismatches.forEach(m => ITEMS.forEach(it => { if (m.diff[it.key]) put([`${m.date} (${weekday(m.date)})${m.open ? ' · 참고' : ''}`, it.name, m.diff[it.key], m.label]); }));
+    r++;
+    put(['QR 상계 내역 (일치 처리)', 'QR추심·QR정산 차액', '', '합산기간', ''], { head: true });
+    if (!res.offsets.length) put(['없음']);
+    res.offsets.forEach(o => put([`${o.date} (${weekday(o.date)})${o.open ? ' · 참고' : ''}`, o.offset, undefined, o.label]));
     r++;
     put(['휴일로 처리한 날', res.usedHolidays.length ? res.usedHolidays.map(d => `${short(d)}(${weekday(d)})`).join(', ') : '없음'], {});
     if (res.warnings.length) { r++; put(['확인 필요'], { head: true }); res.warnings.forEach(w => put([w])); }

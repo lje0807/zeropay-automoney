@@ -102,18 +102,25 @@
     const bad = res.mismatches.filter(m => !m.open);
     const pill = bad.length ? `<span class="pill bad">불일치 영업일 ${bad.length}일</span>` : `<span class="pill ok">전 영업일 일치</span>`;
     const warnPill = res.warnings.length ? ` <span class="pill warn">확인 필요 ${res.warnings.length}건</span>` : '';
-    const sumRows = I.map(it => { const t = res.totals[it.key]; return `<tr><td>${it.name} <span class="code">${it.lag ? 'D-1' : 'D'}</span></td><td class="num">${fmt(t.b)}</td><td class="num">${fmt(t.v)}</td><td class="num${t.diff ? ' neg' : ''}">${fmt(t.diff)}</td></tr>`; }).join('');
+    const offsetSum = res.offsets.reduce((s, o) => s + o.offset, 0);
+    const offPill = res.offsets.length ? ` <span class="pill off">QR 상계 ${res.offsets.length}일 (일치 처리)</span>` : '';
+    const sumRows = I.map(it => {
+      const t = res.totals[it.key];
+      const explained = t.diff && (it.key === 'qr_col' || it.key === 'qr_set') && t.diff === offsetSum;
+      return `<tr><td>${it.name} <span class="code">${it.lag ? 'D-1' : 'D'}</span></td><td class="num">${fmt(t.b)}</td><td class="num">${fmt(t.v)}</td><td class="num${explained ? ' off' : t.diff ? ' neg' : ''}"${explained ? ' title="QR 상계분"' : ''}>${fmt(t.diff)}</td></tr>`;
+    }).join('');
     const misRows = bad.length ? bad.map(m => `<tr class="badrow"><td>${Recon.short(m.date)} (${Recon.weekday(m.date)})</td><td class="lbl">${m.label}</td><td style="text-align:left">${I.filter(it => m.diff[it.key]).map(it => `${it.name} <span class="num neg" style="font-family:var(--mono)">${fmt(m.diff[it.key])}</span>`).join('<br>')}</td></tr>`).join('') : `<tr><td colspan="3" class="empty">불일치 영업일이 없어요.</td></tr>`;
+    const offRows = res.offsets.map(o => `<tr><td>${Recon.short(o.date)} (${Recon.weekday(o.date)})</td><td class="lbl">${o.label}</td><td class="num off">${fmt(o.offset)}</td></tr>`).join('');
     const bankOnly = res.bankOnly.filter(o => o.total).map(o => `<tr><td>${o.name}</td><td class="num">${fmt(o.total)}</td><td class="lbl">${o.days.map(x => `${Recon.short(x.date)} ${fmt(x.amt)}`).join(', ')}</td></tr>`).join('') || `<tr><td colspan="3" class="empty">해당 기간에 금액이 없어요.</td></tr>`;
     const daily = res.rows.map(r => {
       if (!r.closes) return `<tr class="hol"><td>${Recon.short(r.date)} (${Recon.weekday(r.date)})</td><td class="lbl">→ ${Recon.short(r.block[r.block.length - 1])} 합산</td>${I.map(() => '<td></td>').join('')}<td></td></tr>`;
-      const tag = r.open ? '<span class="tag ref">참고</span>' : r.ok ? '<span class="tag ok">일치</span>' : '<span class="tag bad">불일치</span>';
-      return `<tr class="${r.ok ? '' : 'badrow'}"><td>${Recon.short(r.date)} (${Recon.weekday(r.date)})</td><td class="lbl">${r.label}</td>${I.map(it => `<td class="num${r.diff[it.key] ? ' neg' : ''}">${r.diff[it.key] ? fmt(r.diff[it.key]) : '0'}</td>`).join('')}<td style="text-align:center">${tag}</td></tr>`;
+      const tag = r.open ? '<span class="tag ref">참고</span>' : r.offset ? '<span class="tag ok" title="QR추심·QR정산 차액이 같아 상계로 보고 일치 처리">일치 · QR 상계</span>' : r.ok ? '<span class="tag ok">일치</span>' : '<span class="tag bad">불일치</span>';
+      return `<tr class="${r.ok ? '' : 'badrow'}"><td>${Recon.short(r.date)} (${Recon.weekday(r.date)})</td><td class="lbl">${r.label}</td>${I.map(it => `<td class="num${r.diff[it.key] ? (r.offset ? ' off' : ' neg') : ''}">${r.diff[it.key] ? fmt(r.diff[it.key]) : '0'}</td>`).join('')}<td style="text-align:center">${tag}</td></tr>`;
     }).join('');
     $('result').innerHTML = `
       <div class="card">
         <div class="status">
-          <div>${pill}${warnPill}<div class="period" style="margin-top:6px">통장일 ${res.start} ~ ${res.end} · ${res.dates.length}일</div></div>
+          <div>${pill}${offPill}${warnPill}<div class="period" style="margin-top:6px">통장일 ${res.start} ~ ${res.end} · ${res.dates.length}일</div></div>
           <button type="button" class="btn dl" id="dlBtn">대조 엑셀 다운로드</button>
         </div>
         <p class="msg" id="dlMsg" role="status"></p>
@@ -121,7 +128,9 @@
       </div>
       <div class="row2">
         <div class="card"><h3>항목별 합계</h3><div class="tw"><table><thead><tr><th>항목</th><th>통장</th><th>상품권</th><th>차액</th></tr></thead><tbody>${sumRows}</tbody></table></div></div>
-        <div class="card"><h3>불일치 영업일</h3><div class="tw"><table><thead><tr><th>통장일</th><th style="text-align:left">합산기간</th><th style="text-align:left">항목 · 차액</th></tr></thead><tbody>${misRows}</tbody></table></div></div>
+        <div class="card"><h3>불일치 영업일</h3><div class="tw"><table><thead><tr><th>통장일</th><th style="text-align:left">합산기간</th><th style="text-align:left">항목 · 차액</th></tr></thead><tbody>${misRows}</tbody></table></div>${offRows ? `
+          <h3 style="margin-top:18px">QR 상계 (일치 처리)</h3><div class="tw"><table><thead><tr><th>통장일</th><th style="text-align:left">합산기간</th><th>QR추심·QR정산 차액</th></tr></thead><tbody>${offRows}</tbody></table></div>
+          <p class="hint">QR추심과 QR정산 차액이 같은 날은 추심분이 정산 지급액에서 빠진 것으로 보고 일치로 처리했어요.</p>` : ''}</div>
       </div>
       <div class="card"><h3>일별 대조 (통장 − 상품권)</h3><div class="tw daily"><table><thead><tr><th>통장일</th><th style="text-align:left">합산기간</th>${I.map(it => `<th>${it.name}</th>`).join('')}<th style="text-align:center">결과</th></tr></thead><tbody>${daily}</tbody></table></div></div>
       <div class="card"><h3>통장 단독 항목 (대사 제외)</h3><div class="tw"><table><thead><tr><th>항목</th><th>합계</th><th style="text-align:left">일자별</th></tr></thead><tbody>${bankOnly}</tbody></table></div></div>`;

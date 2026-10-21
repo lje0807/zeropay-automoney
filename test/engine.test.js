@@ -64,6 +64,23 @@ test('reconcile: 휴일은 다음 영업일에 합산, 종료일이 휴일이면
   assert.ok(res.warnings.some(w => w.includes('상품권 파일에 없는 거래일: 09.03')), 'D-1 데이터가 빠진 날은 경고');
 });
 
+test('reconcile: QR추심·QR정산 차액이 같을 때만 상계로 일치', () => {
+  const z = { p_buy: 0, c_buy: 0, p_ref: 0, c_ref: 0, qr_col: 0, qr_set: 0, pg: 0, disc: 0, point: 0, auto: 0, trust_in: 0, trust_out: 0 };
+  // 09.01(화) 같은 금액 상계 / 09.02 금액 다름 / 09.03 상계 + 다른 항목 차액 / 09.04 QR추심만 차액
+  const bank = { missing: [], data: {
+    '2026-09-01': { ...z, qr_col: 0, qr_set: 900 }, '2026-09-02': { ...z, qr_col: 0, qr_set: 900 },
+    '2026-09-03': { ...z, qr_col: 0, qr_set: 900, pg: 5 }, '2026-09-04': { ...z, qr_col: 0, qr_set: 1000 } } };
+  const voucher = { missing: [], data: {
+    '2026-08-31': { ...z }, '2026-09-01': { ...z, qr_col: 100, qr_set: 1000 }, '2026-09-02': { ...z, qr_col: 50, qr_set: 1000 },
+    '2026-09-03': { ...z, qr_col: 100, qr_set: 1000 }, '2026-09-04': { ...z, qr_col: 100, qr_set: 1000 } } };
+  const res = R.reconcile(bank, voucher, { start: '2026-09-01', end: '2026-09-04', holidays: [] });
+  const row = d => res.rows.find(r => r.date === d);
+  assert.ok(row('2026-09-01').ok); assert.equal(row('2026-09-01').offset, -100);
+  for (const d of ['2026-09-02', '2026-09-03', '2026-09-04']) { assert.ok(!row(d).ok, d); assert.equal(row(d).offset, 0, d); }
+  assert.deepEqual(res.offsets.map(r => r.date), ['2026-09-01']);
+  assert.deepEqual(res.mismatches.map(r => r.date), ['2026-09-02', '2026-09-03', '2026-09-04']);
+});
+
 // ---------- 2026년 9월 샘플 회귀 테스트 ----------
 test('9월 샘플: 열을 모두 찾는다', { skip }, async () => {
   const { bank, voucher } = await sept();
@@ -73,12 +90,15 @@ test('9월 샘플: 열을 모두 찾는다', { skip }, async () => {
   assert.match(voucher.title, /^경상남도 함양군/);
 });
 
-test('9월 샘플: 불일치 영업일은 9/14, 9/16, 9/23, 9/28 (QR추심·QR정산 상계)', { skip }, async () => {
+test('9월 샘플: 9/14, 9/16, 9/23, 9/28은 QR 상계로 일치 처리, 불일치 영업일 없음', { skip }, async () => {
   const { res } = await sept();
   const expected = { '2026-09-14': -250000, '2026-09-16': -15000, '2026-09-23': -2000, '2026-09-28': -7000 };
-  assert.deepEqual(res.mismatches.map(m => m.date), Object.keys(expected));
-  for (const m of res.mismatches) {
+  assert.deepEqual(res.mismatches, []);
+  assert.deepEqual(res.offsets.map(m => m.date), Object.keys(expected));
+  for (const m of res.offsets) {
     assert.equal(m.open, undefined);
+    assert.ok(m.ok);
+    assert.equal(m.offset, expected[m.date]);
     for (const it of R.ITEMS) {
       const want = it.key === 'qr_col' || it.key === 'qr_set' ? expected[m.date] : 0;
       assert.equal(m.diff[it.key], want, `${m.date} ${it.name}`);
@@ -137,4 +157,5 @@ test('9월 샘플: 대조 시트 수식이 통장·상품권 시트의 올바른
   assert.equal(s3.getCell('I17').value.formula, "SUM('1. 통장'!N15:N17)-SUM('2. 상품권'!H15:H17)"); // QR정산
   assert.equal(s3.getCell('I17').value.result, -250000);
   assert.equal(s3.getCell('C15').value, '→ 09.14 합산');
+  assert.equal(s3.getCell('K17').value, '일치(QR 상계)');
 });
