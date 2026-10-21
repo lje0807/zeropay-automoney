@@ -1,0 +1,11 @@
+{
+  "name": "voucher-recon",
+  "private": true,
+  "description": "상품권 자금대사 정적 웹사이트 (엔진 테스트용 설정)",
+  "scripts": {
+    "test": "node --test test/engine.test.js"
+  },
+  "devDependencies": {
+    "exceljs": "4.4.0"
+  }
+}

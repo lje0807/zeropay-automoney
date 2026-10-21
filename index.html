@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>상품권 자금대사</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: 왼쪽 입력 패널(파일·기간·휴일) + 오른쪽 결과 원장. 좁으면 한 줄로 쌓임 */
+:root{
+  --bg:#eef1f4; --panel:#ffffff; --ink:#18212b; --muted:#5d6876; --line:#d5dbe2; --soft:#f5f7f9;
+  --accent:#1d4e89; --accent-ink:#ffffff; --accent-soft:#e3ecf7;
+  --ok:#1f7a4d; --ok-soft:#e3f3ea; --bad:#b42318; --bad-soft:#fde8e6; --warn:#8a5a00; --warn-soft:#fdf3dc;
+  --sans:"IBM Plex Sans KR",system-ui,-apple-system,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#11161c; --panel:#18202a; --ink:#e6ebf0; --muted:#9aa6b4; --line:#2c3744; --soft:#1e2733;
+  --accent:#6ea2e0; --accent-ink:#0d1520; --accent-soft:#1c2c40;
+  --ok:#5fc48e; --ok-soft:#173226; --bad:#f2877c; --bad-soft:#3a1d1b; --warn:#e8b65a; --warn-soft:#352a14; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#11161c; --panel:#18202a; --ink:#e6ebf0; --muted:#9aa6b4; --line:#2c3744; --soft:#1e2733;
+  --accent:#6ea2e0; --accent-ink:#0d1520; --accent-soft:#1c2c40;
+  --ok:#5fc48e; --ok-soft:#173226; --bad:#f2877c; --bad-soft:#3a1d1b; --warn:#e8b65a; --warn-soft:#352a14; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.55}
+.wrap{max-width:1280px;margin:0 auto;padding-block:28px 48px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+header{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px;margin-bottom:20px}
+h1{font-size:22px;margin:0;letter-spacing:-.01em;text-wrap:balance}
+.sub{color:var(--muted);margin:4px 0 0}
+.grid{display:grid;grid-template-columns:minmax(0,360px) minmax(0,1fr);gap:20px;align-items:start}
+@media (max-width:900px){.grid{grid-template-columns:minmax(0,1fr)}}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px;display:flex;flex-direction:column;gap:18px;min-width:0}
+.step h2{font-size:13px;margin:0 0 8px;color:var(--muted);font-weight:600;letter-spacing:.04em}
+.drop{display:flex;flex-direction:column;gap:2px;border:1.5px dashed var(--line);border-radius:8px;padding:12px 14px;cursor:pointer;background:var(--soft);transition:border-color .15s,background .15s}
+.drop + .drop{margin-top:8px}
+.drop:hover,.drop.over{border-color:var(--accent);background:var(--accent-soft)}
+.drop:focus-within{outline:2px solid var(--accent);outline-offset:2px}
+.drop input{position:absolute;opacity:0;width:1px;height:1px}
+.drop .t{font-weight:600}
+.drop .f{color:var(--muted);font-size:12.5px;word-break:break-all}
+.drop.done{border-style:solid;border-color:var(--ok);background:var(--ok-soft)}
+.drop.done .f{color:var(--ok)}
+.drop.err{border-style:solid;border-color:var(--bad);background:var(--bad-soft)}
+.drop.err .f{color:var(--bad)}
+.dates{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+label.fld{display:flex;flex-direction:column;gap:4px;font-size:12.5px;color:var(--muted)}
+input[type=date]{font:inherit;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:7px 8px;min-width:0;width:100%}
+input:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.hint{font-size:12px;color:var(--muted);margin:6px 0 0}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{display:inline-flex;align-items:center;gap:4px;font-family:var(--mono);font-size:12px;background:var(--soft);border:1px solid var(--line);border-radius:999px;padding:2px 4px 2px 9px}
+.chip.custom{border-color:var(--accent)}
+.chip button{border:0;background:none;color:var(--muted);cursor:pointer;font-size:14px;line-height:1;padding:0 4px;border-radius:999px}
+.chip button:hover{color:var(--bad)}
+.addh{display:flex;gap:6px;margin-top:8px}
+.addh input{flex:1;min-width:0}
+.btn{white-space:nowrap;font:inherit;font-weight:600;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--ink);padding:8px 14px;cursor:pointer}
+.btn:hover{border-color:var(--accent)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);padding:11px 16px;width:100%}
+.btn.primary:disabled{opacity:.45;cursor:not-allowed}
+.btn.dl{background:var(--ink);color:var(--panel);border-color:var(--ink)}
+.result{min-width:0;display:flex;flex-direction:column;gap:16px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px;min-width:0}
+.card h3{margin:0 0 12px;font-size:15px}
+.status{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px}
+.pill{display:inline-flex;align-items:center;gap:6px;font-weight:600;font-size:13px;padding:4px 10px;border-radius:999px}
+.pill.ok{background:var(--ok-soft);color:var(--ok)} .pill.bad{background:var(--bad-soft);color:var(--bad)} .pill.warn{background:var(--warn-soft);color:var(--warn)}
+.period{font-family:var(--mono);font-size:13px;color:var(--muted)}
+.tw{overflow-x:auto;border:1px solid var(--line);border-radius:8px}
+table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}
+th,td{padding:7px 10px;border-bottom:1px solid var(--line);white-space:nowrap;text-align:right}
+th{background:var(--soft);font-weight:600;font-size:12.5px;color:var(--muted);position:sticky;top:0}
+th:first-child,td:first-child{text-align:left}
+td.num{font-family:var(--mono);font-size:12.5px}
+td.neg{color:var(--bad);font-weight:500}
+tr.hol td{color:var(--muted);background:var(--soft)}
+tr.badrow td:first-child{box-shadow:inset 3px 0 0 var(--bad)}
+td.lbl{font-family:var(--mono);font-size:12px;color:var(--muted);text-align:left}
+.tag{font-size:11.5px;font-weight:600;padding:1px 7px;border-radius:999px}
+.tag.ok{background:var(--ok-soft);color:var(--ok)} .tag.bad{background:var(--bad-soft);color:var(--bad)} .tag.ref{background:var(--soft);color:var(--muted);border:1px solid var(--line)}
+.daily{max-height:520px;overflow:auto}
+.warns{display:flex;flex-direction:column;gap:6px;margin:0;padding:0;list-style:none}
+.warns li{background:var(--warn-soft);color:var(--warn);border-radius:6px;padding:8px 10px;font-size:13px}
+.rules td,.rules th{white-space:normal;text-align:left}
+.rules td:first-child{font-weight:600}
+.code{font-family:var(--mono);font-size:12px;background:var(--soft);border:1px solid var(--line);border-radius:4px;padding:0 5px}
+.empty{color:var(--muted)}
+.row2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,440px),1fr));gap:16px}
+.msg{font-size:13px;margin:8px 0 0}
+.msg.err{color:var(--bad)} .msg.ok{color:var(--ok)}
+.spin{display:inline-block;width:12px;height:12px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:sp .7s linear infinite;vertical-align:-1px}
+@keyframes sp{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spin{animation:none}}
+</style>
+<style>html,body{margin:0}[hidden]{display:none!important}</style>
+</head>
+<body>
+
+
+<div class="wrap">
+  <header>
+    <div>
+      <h1>상품권 자금대사</h1>
+      <p class="sub">통장(발행처) 집계와 상품권 일별 집계를 통장일 기준으로 맞추고, 대조 엑셀을 만들어요. 파일은 브라우저 안에서만 처리돼요.</p>
+    </div>
+  </header>
+
+  <div class="grid">
+    <form class="panel" id="form" novalidate>
+      <div class="step">
+        <h2>1 · 파일</h2>
+        <label class="drop" id="dropBank">
+          <input type="file" id="fileBank" accept=".xlsx">
+          <span class="t">통장(발행처) 파일</span>
+          <span class="f" id="nameBank">엑셀을 끌어 놓거나 눌러서 선택</span>
+        </label>
+        <label class="drop" id="dropVoucher">
+          <input type="file" id="fileVoucher" accept=".xlsx">
+          <span class="t">상품권 일별 집계 파일</span>
+          <span class="f" id="nameVoucher">엑셀을 끌어 놓거나 눌러서 선택</span>
+        </label>
+      </div>
+
+      <div class="step">
+        <h2>2 · 대사 기간 (통장일)</h2>
+        <div class="dates">
+          <label class="fld">시작일<input type="date" id="start"></label>
+          <label class="fld">종료일<input type="date" id="end"></label>
+        </div>
+        <p class="hint">통장 파일을 올리면 파일 기간으로 채워져요. 구매·환불은 D-1로 맞추므로 상품권 파일에 시작일 전날 데이터도 있어야 해요.</p>
+      </div>
+
+      <div class="step">
+        <h2>3 · 휴일 (주말 외)</h2>
+        <div class="chips" id="chips"></div>
+        <div class="addh">
+          <input type="date" id="addDate" aria-label="휴일 추가">
+          <button type="button" class="btn" id="addBtn">추가</button>
+        </div>
+        <p class="hint">휴일 거래는 다음 영업일 통장 금액과 합산해 비교해요. 임시공휴일은 직접 추가해 주세요.</p>
+      </div>
+
+      <div>
+        <button type="submit" class="btn primary" id="run" disabled>대사 실행</button>
+        <p class="msg" id="msg" role="status"></p>
+      </div>
+    </form>
+
+    <section class="result" id="result" aria-live="polite">
+      <div class="card" id="intro">
+        <h3>맞추는 기준</h3>
+        <div class="tw">
+          <table class="rules">
+            <thead><tr><th>항목</th><th>통장(발행처)</th><th>상품권 파일</th><th>거래일</th></tr></thead>
+            <tbody id="rulesBody"></tbody>
+          </table>
+        </div>
+        <p class="hint">통장일 D의 금액을 상품권 거래일과 비교해요. 할인지원금·적립금·자동생성대금·신탁이체/이자는 상품권 파일에 대응 값이 없어 통장 금액만 요약에 표시해요.</p>
+      </div>
+      <div class="card empty" id="placeholder">
+        두 파일을 올리고 <b>대사 실행</b>을 누르면 항목별 합계, 불일치 영업일, 일별 대조표가 여기에 나와요. 결과는 엑셀(통장·상품권·대조·요약 4개 시트)로 받을 수 있어요.
+      </div>
+    </section>
+  </div>
+</div>
+
+<script src="vendor/exceljs.min.js"></script>
+<script src="js/engine.js"></script>
+<script src="js/app.js"></script>
+
+</body>
+</html>
